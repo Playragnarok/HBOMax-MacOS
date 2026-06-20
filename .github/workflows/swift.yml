@@ -1,0 +1,68 @@
+name: Build and Release macOS App
+
+on:
+  push:
+    tags:
+      - 'v*' # ทำงานเมื่อมีการ Push Tag ที่ขึ้นต้นด้วย v เช่น v1.0.0
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    permissions:
+      contents: write 
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # อัปเดตเวอร์ชันของ action เป็นล่าสุดเพื่อความเสถียรบน macos-latest
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1.2.1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build macOS App
+        run: |
+          xcodebuild clean build \
+            -project "HBOMax.xcodeproj" \
+            -scheme "HBOMax" \
+            -configuration Release \
+            -destination "platform=macOS" \
+            SYMROOT="$(PWD)/build" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Sign and Package the App
+        run: |
+          cd build/Release
+          
+          # ตรวจสอบก่อนว่า Xcode สร้างไฟล์ .app สำเร็จจริงหรือไม่ (ป้องกัน Silent Error)
+          if [ ! -d "HBOMax.app" ]; then
+            echo "❌ Error: Youtube.app not found! The build might have failed silently."
+            exit 1
+          fi
+
+          # ประทับตรา Ad-Hoc 
+          echo "✅ Signing the app with Ad-Hoc signature..."
+          codesign --force --deep -s - HBOMax.app
+          
+          # บีบอัดด้วยวิธีมาตรฐานของ Apple
+          echo "📦 Packaging the app into a zip file..."
+          ditto -c -k --sequesterRsrc --keepParent HBOMax.app HBOMax-Mac.zip
+
+      # [ส่วนที่เพิ่มมา] อัปโหลดเป็น Artifact เพื่อให้ทีมหรือคุณดาวน์โหลดไปเทสต์ได้ทันทีจากหน้า Actions
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HBOMax-Mac-App
+          path: build/Release/Youtube-Mac.zip
+          retention-days: 7
+
+      - name: Create GitHub Release and Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Release/HBOMax-Mac.zip
+          generate_release_notes: true # [ส่วนที่เพิ่มมา] ให้ GitHub สรุป Commit ลง Release Notes ให้อัตโนมัติ
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
